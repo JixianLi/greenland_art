@@ -1,100 +1,96 @@
 # Greenland Art Project
 
-A multi-sensory artistic installation exploring the Greenland Ice Sheet through simulation/observation data, climate history, and AI-driven data analysis.
+Exploring the Greenland Ice Sheet through observational data, with an eye toward
+multi-sensory installation and AI-assisted analysis of multi-field records.
 
-## Project Overview
+**Everything in `outputs/` is built from real observational records.** Nothing is
+simulated, stylised, or synthetic. See `CLAUDE.md` for why this is stated so
+prominently.
 
-This project presents the Greenland Ice Sheet from multiple perspectives:
-- Current ice sheet dynamics from satellite and in-situ observations
-- Historical evolution going back millions of years
-- Future projections under various climate scenarios
-- AI-driven pattern discovery in high-dimensional climate data
-
-The final exhibition aims to create an immersive, multi-sensory experience that helps viewers feel the scale and urgency of Greenland's transformation.
-
-## Project Structure
-
-```
-greenland_art/
-├── README.md              # This file
-├── pyproject.toml         # Python project configuration (uv)
-├── scripts/               # Data download and processing scripts
-├── datasets/              # Symlink to ~/dataset/greenland_art
-│                         # (actual data lives outside the repo)
-├── src/                   # Source code for analysis and visualization
-│   └── greenland_art/     # Main package
-│       ├── __init__.py
-│       ├── data/          # Data loading and processing
-│       ├── analysis/      # Data analysis modules
-│       └── visualization/ # Visualization utilities
-└── tests/                 # Test suite
-```
-
-## Data Sources
-
-### Ice Sheet Observations
-- **NSIDC DAAC**: Satellite data (GRACE, ICESat, CryoSat)
-- **PROMICE**: Glacier mass balance and velocity
-- **MEaSUREs**: Ice sheet velocity and thickness changes
-
-### Paleoclimate Data (DOWNLOADED ✅)
-- **NOAA Paleoclimatology**: Ice cores, sediment cores, proxies
-- **Ice core records**: GISP2, GRIP, NGRIP (100,000+ years)
-- **Deep sea sediments**: Million-year records
-
-#### Ice Core Data Status (July 2026)
-We have successfully downloaded and verified the following datasets:
-
-| Dataset | Time Span | Samples | δ¹⁸O Range | Description |
-|---------|-----------|---------|------------|-------------|
-| **GISP2** | 111 ka | 1,390 | -43.26 to -33.41‰ | Full glacial-interglacial cycle |
-| **GRIP** | 249 ka | 5,425 | (not yet analyzed) | Extended record, multiple glacial cycles |
-| **NGRIP** | 123 ka | (loading issue) | - | High-resolution at 50-year intervals |
-
-**Key findings:**
-- The GISP2 data shows clear climate shifts between glacial (~-40‰) and interglacial (~-35‰) periods
-- Last Glacial Maximum (26-19 ka): mean δ¹⁸O = -40.56‰
-- Holocene (0-11.7 ka): mean δ¹⁸O = -34.90‰
-- The 10‰ variation encodes temperature changes of ~10-15°C
-
-**Note on time scales:**
-- Ice cores from Greenland give us ~100k-250k years (not millions)
-- For millions-of-years records, deep sea sediment cores are needed
-- Greenland Ice Sheet itself formed ~2.5-3 million years ago
-- For ice sheet dynamics (surges, retreats), the 100k record is most relevant
-
-### Ocean & Climate
-- **CarbonTracker**: CO2 fluxes and atmospheric carbon
-- **AMOC data**: Atlantic Meridional Overturning Circulation
-- **RACMO**: Regional climate model outputs
-
-## Technology Stack
-
-- **Python** (managed via `uv`)
-- **Xarray**: N-dimensional climate data arrays
-- **Dask**: Distributed computing for large datasets
-- **Zarr**: Chunked array storage
-- **hvPlot/Panel**: Interactive visualization
-- **UMAP/t-SNE**: Dimensionality reduction
-- **librosa**: Audio/sound analysis
-
-## Setup
+## Quick start
 
 ```bash
-# Install dependencies
 uv sync
-
-# Activate environment
-uv run python -m greenland_art
+uv run python scripts/download_preview_data.py    # ~3 MB, no account needed
+uv run python scripts/build_preview_figure.py     # -> outputs/greenland_preview.png
+uv run python scripts/build_preview_app.py        # -> outputs/greenland_preview.html
 ```
 
-## Current Status
+Open `outputs/greenland_preview.html` in any browser. It is self-contained: no
+server, no Python, no network. Drag horizontally across the chemistry panel to
+select a time window and the Greenland map recomputes.
 
-This project is in the **exploration stage**. The focus is on:
-1. Understanding what data is available
-2. Exploring Human + AI collaboration for data interpretation
-3. Designing multi-sensory exhibition components
+## The preview
 
-## License
+Two questions it is meant to answer.
 
-TBD
+**Can a timeline drive a spatial view?** Yes, and the linkage is real rather
+than a mockup. Box-selecting a window on the GISP2 chemistry panel recomputes
+each of the ten Osman core sites' δ¹⁸O anomaly for that window against its own
+1750–1950 baseline, and repaints the map in EPSG:3413. The recomputation runs
+client-side, and the browser's results have been checked against the Python
+implementation to 4 decimal places.
+
+**Is the multi-field data real and rich enough to be interesting?** Eight
+chemical species are co-registered on a single time axis — the matrix an
+autoencoder would consume. The industrial signal is unambiguous in it:
+
+| GISP2 sulfate | Mean |
+|---|---|
+| 1550–1750 | 37.9 ppb |
+| 1950–1988 | 110.7 ppb |
+
+The volcanic sulfate panel is independent ground truth. The three largest
+signals since 1700 are Laki (1783), Tambora (1815) and Katmai (1912) — none of
+which were used to fit anything.
+
+## Data
+
+Downloaded by `scripts/download_preview_data.py`, all open HTTP, no credentials.
+
+| Source | What | Coverage |
+|---|---|---|
+| **Osman et al. 2021** (PNAS) | δ¹⁸O + accumulation, 10 sites | annual, to 2013 |
+| **GISP2 `chem/ionb.txt`** (Mayewski et al. 1997) | 8 major ions | ~2-yearly, to 1988 |
+| **GISP2 `chem/volcano.txt`** (Zielinski et al. 1994) | total + volcanic sulfate | to 1985 |
+| **GISP2 `physical/`** | accumulation, borehole temperature | — |
+| **Natural Earth 50 m** | Greenland outline | — |
+
+Osman sites span the full ice sheet: ACT2 (66.0 N) to Humboldt (78.5 N). Two are
+accumulation-only, and Eurocore's δ¹⁸O ends in 1741 — the figures show these as
+empty markers rather than hiding them.
+
+### Known limits
+
+- Greenland ice cores reach ~130 ka. They do **not** reach a million years; that
+  needs marine sediment stacks (LR04, 5.3 Ma) or ice sheet model runs.
+- The GRIP record's basal section is stratigraphically disturbed. Its nominal
+  249 ka span should not be cited as clean climate signal.
+- There is **no gridded chemistry product for Greenland**. Chemistry is
+  point-source only. Gridded multi-field data means RACMO/MAR physical fields —
+  see `docs/data_access.md`.
+- ~69 chemistry samples cover the industrial era. That is a display target, not
+  a training set.
+
+## Layout
+
+```
+scripts/     download and build scripts
+src/greenland_art/
+  data/      loaders for the NOAA formats (osman2021, gisp2)
+  analysis/  anomalies, standardisation, novelty scoring
+  visualization/  EPSG:3413 projection, coastline, label placement
+docs/        data_access.md — account setup for RACMO / MAR / ERA5
+outputs/     generated figure and self-contained app
+datasets/    symlink to ~/dataset/greenland_art (gitignored)
+```
+
+## Next
+
+- Replace the placeholder novelty score with a trained autoencoder's
+  reconstruction error; use latent trajectories as a second timeline.
+- Bring in a real gridded field (RACMO 1 km, or ITS_LIVE velocity, which needs
+  no account) so the spatial view is continuous rather than ten points.
+- For the million-year direction: PISM and other open ice sheet models have
+  published multi-million-year Greenland spin-ups, which is a smaller ask of a
+  collaborator than a new simulation campaign.
