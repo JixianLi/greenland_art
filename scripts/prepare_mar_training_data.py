@@ -44,9 +44,16 @@ MAXIMUM_FILL_FRACTION = 0.02
 # because they are exactly the kind of near-redundant channel a bottleneck
 # should collapse.
 SURFACE_FIELDS = [
-    "SF", "RF", "CP",
-    "SWD", "LWD", "LWU", "SHF", "LHF",
-    "AL", "ST", "PDD", "SP",
+    # Mass budget. SMB ~ SF + RF - RU - SU - SW, with ME and RZ the melt and
+    # refreeze terms that drive RU; omitting them leaves the budget incomplete.
+    "SF", "RF", "CP", "ME", "RZ", "SW", "SWSN",
+    # Surface energy budget.
+    "SWD", "LWD", "LWU", "SHF", "LHF", "AL", "AL2",
+    # Surface state.
+    "ST", "PDD", "SP", "TTMIN", "TTMAX", "UVMAX", "R0",
+    # Snowpack geometry and grain shape.
+    "SHSN0", "SHSN2", "G11", "G21",
+    # Cloud state and hydrometeors.
     "QW", "QI", "QS", "QR",
     "CC", "COD", "CU", "CM", "CD",
     "WVP", "IWP", "CWP",
@@ -62,9 +69,12 @@ SECTOR_FIELDS = ["SMB", "SU", "RU", "AL1", "SHSN3", "ST2", "Z0", "PBL"]
 # 100-dimensional latent -- PCA is capped at n_features components, and a
 # bottleneck wider than its input is not a bottleneck.
 PROFILE_FIELDS = [
-    "RO1", "TI1", "WA1",
-    "UUH", "VVH", "SWDH", "LWDH", "LWUH", "SPH", "SHFH", "LHFH", "ALH", "CCH",
-    "TTP", "QQP", "UUP", "VVP",
+    "RO1", "TI1", "WA1",                                       # snowpack, 18 layers
+    "UUH", "VVH", "SWDH", "LWDH", "LWUH", "SPH",               # sub-daily, 4 each
+    "SHFH", "LHFH", "ALH", "CCH", "TTH", "QQH",
+    "TT", "QQ", "RH", "UU", "VV", "UV", "ZZ",                  # atmospheric layers
+    "TTZ", "QQZ", "UUZ", "VVZ", "UVZ",                         # fixed heights
+    "TTP", "QQP", "UUP", "VVP", "ZZP",                         # pressure levels
 ]
 
 
@@ -127,7 +137,12 @@ def available_bases(paths: list[Path], include_profiles: bool) -> list[str]:
 
 
 def expand_field_names(path: Path, bases: list[str]) -> list[str]:
-    """Column names, one entry per level for fields carrying a level axis."""
+    """Column names, one entry per level for fields carrying a level axis.
+
+    Some single-level fields (ME, RZ, SW, G11, G21) carry a size-1 SECTOR1_1
+    axis, so they come out suffixed _L00 rather than bare. Harmless, but worth
+    knowing when looking a column up by name.
+    """
     dataset = xr.open_dataset(path, decode_times=False)
     names = []
     for base in bases:
