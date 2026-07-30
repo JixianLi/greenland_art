@@ -48,7 +48,7 @@ immediately or silently queues forever:
 |---|---|
 | allocation | Not in the script. `export SBATCH_ACCOUNT=<alloc>`, or `sbatch -A <alloc>`. `#SBATCH` lines do not expand variables. |
 | `-p` | committed as `gh` (Vista). Use `gpu-a100` on Lonestar6, or `export SBATCH_PARTITION=...`. Confirm with `sinfo -s`. |
-| `module load` | TACC module names differ per system and change over time. |
+| `MODULES` | committed as `gcc/15.1.0 cuda/13.1` (Vista). Versions are pinned on purpose; bare `gcc cuda` takes the drifting site default. Override with `--export=ALL,MODULES="..."`. |
 
 ## Vista versus Lonestar6
 

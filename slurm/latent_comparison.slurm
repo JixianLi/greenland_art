@@ -43,8 +43,18 @@
 
 set -euo pipefail
 
+# Pin the toolchain versions. Bare "module load gcc cuda" takes whatever the
+# site default is at the time, which drifts across maintenance windows and can
+# pair a compiler with a mismatched CUDA -- the failures that produces surface
+# late and read as unrelated. Override for a different system:
+#   sbatch --export=ALL,MODULES="gcc/13.2.0 cuda/12.4" ...
+MODULES="${MODULES:-gcc/15.1.0 cuda/13.1}"
+
 module purge
-module load gcc cuda || echo "module load failed; relying on the uv environment"
+# Deliberately not tolerated with "|| true": continuing without the requested
+# toolchain trades an immediate, readable failure for a cryptic one much later.
+module load $MODULES
+module list 2>&1 || true
 
 PROJECT_DIR="${PROJECT_DIR:-$SCRATCH/greenland_art}"
 DATA="${DATA:-$PROJECT_DIR/datasets/mar_training_2000_2009.npz}"
