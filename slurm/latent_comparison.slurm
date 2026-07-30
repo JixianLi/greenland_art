@@ -5,7 +5,11 @@
 # Written for TACC. Defaults target Lonestar6 A100 nodes; see the Vista block
 # below for the GH200 partition names.
 #
-#   sbatch --export=ALL,DATA=$SCRATCH/mar_training_2000_2009.npz latent_comparison.slurm
+#   sbatch slurm/latent_comparison.slurm
+#
+# Expects the project at $SCRATCH/greenland_art with the prepared matrix in
+# its datasets/ directory. Override PROJECT_DIR, DATA or OUTPUT_DIR via
+# --export if the layout differs.
 #
 # VERIFY BEFORE SUBMITTING:
 #   -A            your allocation name (this will not run without it)
@@ -32,12 +36,21 @@ set -euo pipefail
 module purge
 module load gcc cuda || echo "module load failed; relying on the uv environment"
 
-PROJECT_DIR="${PROJECT_DIR:-$WORK/greenland_art}"
-DATA="${DATA:-$SCRATCH/mar_training_2000_2009.npz}"
-OUTPUT_DIR="${OUTPUT_DIR:-$SCRATCH/greenland_latent/$SLURM_JOB_ID}"
+PROJECT_DIR="${PROJECT_DIR:-$SCRATCH/greenland_art}"
+DATA="${DATA:-$PROJECT_DIR/datasets/mar_training_2000_2009.npz}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs}"
 
 cd "$PROJECT_DIR"
 mkdir -p logs "$OUTPUT_DIR"
+
+# The datasets/ symlink is not tracked, so on a cluster this directory holds
+# the transferred matrix directly. Fail here with a readable message rather
+# than several minutes later inside the Python.
+if [[ ! -f "$DATA" ]]; then
+    echo "ERROR: training matrix not found at $DATA" >&2
+    echo "       scp it to \$PROJECT_DIR/datasets/ or pass DATA=... via --export" >&2
+    exit 1
+fi
 
 echo "host       : $(hostname)"
 echo "job        : ${SLURM_JOB_ID:-none}"

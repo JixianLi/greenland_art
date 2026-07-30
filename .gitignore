@@ -4,3 +4,6 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 .DS_Store
+
+# Symlink to the external dataset tree; contents and the link itself are local.
+datasets

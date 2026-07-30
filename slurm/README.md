@@ -11,10 +11,15 @@ reduces it to a single `.npz`.
 uv run python scripts/prepare_mar_training_data.py \
     --first-year 2000 --last-year 2009 --day-stride 5
 
-scp datasets/mar/mar_training_2000_2009.npz  <user>@ls6.tacc.utexas.edu:\$SCRATCH/
-rsync -av --exclude .venv --exclude datasets --exclude outputs \
-    ./ <user>@ls6.tacc.utexas.edu:\$WORK/greenland_art/
+# on the cluster: project at $SCRATCH/greenland_art, matrix inside its datasets/
+ssh <user>@vista.tacc.utexas.edu "mkdir -p \$SCRATCH/greenland_art/datasets"
+git clone git@github.com:JixianLi/greenland_art.git \$SCRATCH/greenland_art   # or git pull
+scp datasets/mar/mar_training_2000_2009.npz \
+    <user>@vista.tacc.utexas.edu:\$SCRATCH/greenland_art/datasets/
 ```
+
+`datasets/` is a gitignored symlink locally, so the clone does not create it.
+On the cluster it is a real directory holding the transferred matrix.
 
 `--day-stride 5` keeps every fifth day. Stride 1 is ~9 GB, which is a painful
 transfer for no obvious gain: 3.4 M samples is already far more than an MLP of
@@ -23,10 +28,15 @@ this size needs, and consecutive days are highly correlated anyway.
 ## Submitting
 
 ```bash
-cd $WORK/greenland_art
-sbatch --export=ALL,DATA=$SCRATCH/mar_training_2000_2009.npz \
-       slurm/latent_comparison.slurm
+cd $SCRATCH/greenland_art
+sbatch slurm/latent_comparison.slurm
 ```
+
+Defaults: `PROJECT_DIR=$SCRATCH/greenland_art`,
+`DATA=$PROJECT_DIR/datasets/mar_training_2000_2009.npz`,
+`OUTPUT_DIR=$PROJECT_DIR/outputs`. Override any of them with `--export`. The
+script checks the matrix exists before doing anything else, so a wrong path
+fails in seconds rather than after the environment resolves.
 
 Three things in the script **must** be checked before the first submission —
 they are placeholders or system-specific, and a wrong value either fails
@@ -51,14 +61,13 @@ UMAP dominates the wall clock. Confirm the rest of the pipeline runs before
 spending the full allocation:
 
 ```bash
-sbatch --export=ALL,DATA=$SCRATCH/mar_training_2000_2009.npz,\
-EXTRA_ARGS="--max-samples 200000 --epochs 5 --skip-umap" \
+sbatch --export=ALL,EXTRA_ARGS="--max-samples 200000 --epochs 5 --skip-umap" \
        slurm/latent_comparison.slurm
 ```
 
 ## Outputs
 
-Written to `$SCRATCH/greenland_latent/<jobid>/`:
+Written to `$PROJECT_DIR/outputs/`:
 
 - `results.json` — PCA per-component and cumulative explained variance ratio at
   each latent width, autoencoder validation EVR and MSE, and the full training
