@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Compare PCA, an MLP autoencoder, and UMAP on the MAR multi-field matrix.
+
+Designed to run unattended on a GPU node. Writes a results JSON plus figures.
+
+What each method is asked for, and why they are not scored on one axis:
+
+  PCA     linear, deterministic, seconds to fit. The benchmark. Reported with
+          per-component explained variance ratio, which is the only method here
+          that decomposes variance component by component.
+  MLP-AE  nonlinear. Reported with total explained variance ratio and MSE at
+          matched latent width, so any gain over PCA is attributable to
+          nonlinearity rather than to a wider bottleneck.
+  UMAP    neighbour embedding for visualisation only. No reconstruction error is
+          reported because it has no faithful inverse; a number there would
+          invite a comparison that does not mean anything.
+"""
+
+import argparse
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+
+from greenland_art.autoencoder import (
+    MLPAutoencoder,
+    PCAModel,
+    StandardScalerState,
+    UMAPProjection,
+)
+
+DEFAULT_LATENT_DIMS = (15, 30, 100)
+
+
+def load_matrix(path: Path, max_samples: int | None, seed: int):
+    payload = np.load(path, allow_pickle=False)
+    features = payload["features"]
+    field_names = payload["field_names"]
+
+    index = np.arange(len(features))
+    if max_samples is not None and len(features) > max_samples:
+        index = np.random.default_rng(seed).choice(len(features), max_samples, replace=False)
+        index.sort()
+
+    return features[index], field_names, {k: payload[k][index] for k in ("cell_index", "day_of_year", "year")}
+
+
+def split(n_samples: int, validation_fraction: float, seed: int):
+    shuffled = np.random.default_rng(seed).permutation(n_samples)
+    cut = int(n_samples * validation_fraction)
+    return shuffled[cut:], shuffled[:cut]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, required=True, help="npz from prepare_mar_training_data.py")
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/latent_comparison"))
+    parser.add_argument("--latent-dims", type=int, nargs="+", default=list(DEFAULT_LATENT_DIMS))
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--epochs", type=int, default=60)
+    parser.add_argument("--batch-size", type=int, default=8192)
+    parser.add_argument("--hidden", type=int, nargs="+", default=[512, 256, 128])
+    parser.add_argument("--umap-subsample", type=int, default=100_000)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--skip-umap", action="store_true")
+    arguments = parser.parse_args()
+
+    arguments.output_dir.mkdir(parents=True, exist_ok=True)
+
+    features, field_names, meta = load_matrix(arguments.input, arguments.max_samples, arguments.seed)
+    n_samples, n_features = features.shape
+    print(f"matrix {n_samples:,} x {n_features}", flush=True)
+
+    usable = [d for d in arguments.latent_dims if d <= n_features]
+    if len(usable) != len(arguments.latent_dims):
+        dropped = sorted(set(arguments.latent_dims) - set(usable))
+        print(f"dropping latent dims {dropped}: exceed n_features={n_features}", flush=True)
+
+    train_index, validation_index = split(n_samples, 0.1, arguments.seed)
+    scaler = StandardScalerState.fit(features[train_index])
+    train = scaler.transform(features[train_index])
+    validation = scaler.transform(features[validation_index])
+    print(f"train {len(train):,}  validation {len(validation):,}", flush=True)
+
+    results = {
+        "n_samples": int(n_samples),
+        "n_features": int(n_features),
+        "field_names": [str(f) for f in field_names],
+        "latent_dims": usable,
+        "pca": {},
+        "autoencoder": {},
+    }
+    latents = {}
+
+    for latent_dim in usable:
+        print(f"\n=== latent {latent_dim} ===", flush=True)
+
+        started = time.time()
+        pca = PCAModel(latent_dim, seed=arguments.seed).fit(train)
+        ratios = pca.explained_variance_ratio_per_component
+        results["pca"][str(latent_dim)] = {
+            "explained_variance_ratio_per_component": [float(v) for v in ratios],
+            "cumulative_explained_variance_ratio": [float(v) for v in np.cumsum(ratios)],
+            "total_explained_variance_ratio": float(ratios.sum()),
+            "validation_explained_variance_ratio": pca.explained_variance_ratio(validation),
+            "validation_mse": pca.mean_squared_error(validation),
+            "fit_seconds": time.time() - started,
+        }
+        print(
+            f"PCA({latent_dim}): total EVR {ratios.sum():.4f}  "
+            f"val EVR {pca.explained_variance_ratio(validation):.4f}  "
+            f"val MSE {pca.mean_squared_error(validation):.5f}",
+            flush=True,
+        )
+        print(f"  first 10 component ratios: {np.round(ratios[:10], 4).tolist()}", flush=True)
+
+        started = time.time()
+        autoencoder = MLPAutoencoder(
+            latent_dim,
+            hidden_sizes=tuple(arguments.hidden),
+            max_epochs=arguments.epochs,
+            batch_size=arguments.batch_size,
+            device=arguments.device,
+            seed=arguments.seed,
+        ).fit(train)
+        results["autoencoder"][str(latent_dim)] = {
+            "validation_explained_variance_ratio": autoencoder.explained_variance_ratio(validation),
+            "validation_mse": autoencoder.mean_squared_error(validation),
+            "hidden_sizes": list(arguments.hidden),
+            "epochs_run": len(autoencoder.history),
+            "history": autoencoder.history,
+            "fit_seconds": time.time() - started,
+        }
+        print(
+            f"MLP-AE({latent_dim}): val EVR "
+            f"{autoencoder.explained_variance_ratio(validation):.4f}  "
+            f"val MSE {autoencoder.mean_squared_error(validation):.5f}",
+            flush=True,
+        )
+        autoencoder.save(arguments.output_dir / f"mlp_autoencoder_latent{latent_dim}.pt")
+        latents[latent_dim] = autoencoder.encode(validation)
+
+    # 2D views of each latent space, plus of the raw input for reference.
+    projections = {}
+    for label, matrix in [("input", validation)] + [(f"latent{d}", z) for d, z in latents.items()]:
+        projections[f"{label}_pca2"] = PCAModel(2, seed=arguments.seed).fit_encode(matrix)
+        if not arguments.skip_umap:
+            started = time.time()
+            projections[f"{label}_umap2"] = UMAPProjection(
+                2, seed=arguments.seed, subsample=arguments.umap_subsample
+            ).fit(matrix).encode(matrix)
+            print(f"UMAP on {label}: {time.time() - started:.0f}s", flush=True)
+
+    np.savez_compressed(
+        arguments.output_dir / "projections.npz",
+        **{k: v.astype(np.float32) for k, v in projections.items()},
+        validation_index=validation_index.astype(np.int32),
+        cell_index=meta["cell_index"][validation_index],
+        day_of_year=meta["day_of_year"][validation_index],
+        year=meta["year"][validation_index],
+    )
+    with open(arguments.output_dir / "results.json", "w") as handle:
+        json.dump(results, handle, indent=2)
+
+    print(f"\nWrote {arguments.output_dir}/results.json and projections.npz", flush=True)
+
+
+if __name__ == "__main__":
+    main()

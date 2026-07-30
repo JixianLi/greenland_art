@@ -21,6 +21,7 @@ dependencies = [
     "notebook",
     "cdsapi>=0.7.7",
     "netcdf4>=1.7.3",
+    "torch>=2.13.0",
 ]
 
 [project.optional-dependencies]
