@@ -34,7 +34,7 @@ sbatch slurm/latent_comparison.slurm
 
 Defaults: `PROJECT_DIR=$SCRATCH/greenland_art`,
 `DATA=$PROJECT_DIR/datasets/mar_training_2000_2009.npz`,
-`OUTPUT_DIR=$PROJECT_DIR/outputs`. Override any of them with `--export`. The
+`OUTPUT_DIR=$PROJECT_DIR/outputs/<jobid>`. Override any of them with `--export`. The
 script checks the matrix exists before doing anything else, so a wrong path
 fails in seconds rather than after the environment resolves.
 
@@ -67,7 +67,9 @@ sbatch --export=ALL,EXTRA_ARGS="--max-samples 200000 --epochs 5 --skip-umap" \
 
 ## Outputs
 
-Written to `$PROJECT_DIR/outputs/`:
+Written to `$PROJECT_DIR/outputs/<jobid>/` — one directory per job, so
+reruns do not overwrite each other and results stay separable from the
+tracked figures already in `outputs/`:
 
 - `results.json` — PCA per-component and cumulative explained variance ratio at
   each latent width, autoencoder validation EVR and MSE, and the full training

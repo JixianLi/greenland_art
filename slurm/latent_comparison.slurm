@@ -38,7 +38,9 @@ module load gcc cuda || echo "module load failed; relying on the uv environment"
 
 PROJECT_DIR="${PROJECT_DIR:-$SCRATCH/greenland_art}"
 DATA="${DATA:-$PROJECT_DIR/datasets/mar_training_2000_2009.npz}"
-OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs}"
+# Per-job subdirectory so successive runs do not overwrite each other, and
+# so results stay separable from the tracked figures in outputs/.
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs/${SLURM_JOB_ID:-manual}}"
 
 cd "$PROJECT_DIR"
 mkdir -p logs "$OUTPUT_DIR"

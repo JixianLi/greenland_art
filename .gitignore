@@ -7,3 +7,7 @@ __pycache__/
 
 # Symlink to the external dataset tree; contents and the link itself are local.
 datasets
+
+# Per-job cluster results land in outputs/<jobid>/; only the curated
+# figures at the top level are tracked.
+outputs/*/
