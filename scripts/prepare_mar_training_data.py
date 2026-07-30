@@ -102,48 +102,58 @@ def _level_dim(variable) -> str | None:
     )
 
 
-def expand_field_names(path: Path, include_profiles: bool) -> list[str]:
-    """Column names, one entry per level for the profile fields."""
-    dataset = xr.open_dataset(path, decode_times=False)
-    names = list(SURFACE_FIELDS + SECTOR_FIELDS)
+def available_bases(paths: list[Path], include_profiles: bool) -> list[str]:
+    """Requested variables present in EVERY annual file, in declared order.
+
+    The variable set is not constant across the archive: the 2000s files omit
+    Z0, which the 1948 files carry. Taking the intersection keeps the column
+    layout identical for every year, which is what makes the rows stackable at
+    all -- a per-file field list would silently shift columns between years.
+    """
+    requested = list(SURFACE_FIELDS + SECTOR_FIELDS)
     if include_profiles:
-        for base in PROFILE_FIELDS:
-            if base not in dataset:
-                continue
-            dim = _level_dim(dataset[base])
-            if dim is None:
-                names.append(base)
-            else:
-                names += [f"{base}_L{i:02d}" for i in range(dataset.sizes[dim])]
+        requested += PROFILE_FIELDS
+
+    present: set[str] | None = None
+    for path in paths:
+        with xr.open_dataset(path, decode_times=False) as dataset:
+            names = set(dataset.data_vars)
+        present = names if present is None else (present & names)
+
+    missing = [name for name in requested if name not in present]
+    if missing:
+        print(f"  not present in every year, skipping: {', '.join(missing)}")
+    return [name for name in requested if name in present]
+
+
+def expand_field_names(path: Path, bases: list[str]) -> list[str]:
+    """Column names, one entry per level for fields carrying a level axis."""
+    dataset = xr.open_dataset(path, decode_times=False)
+    names = []
+    for base in bases:
+        dim = _level_dim(dataset[base])
+        if dim is None:
+            names.append(base)
+        else:
+            names += [f"{base}_L{i:02d}" for i in range(dataset.sizes[dim])]
     dataset.close()
     return names
 
 
-def load_year(path: Path, include_profiles: bool) -> tuple[np.ndarray, xr.Dataset]:
+def load_year(path: Path, bases: list[str]) -> tuple[np.ndarray, xr.Dataset]:
     """Return (n_days, n_features, ny, nx) for one annual file."""
     dataset = xr.open_dataset(path, decode_times=False)
     planes = []
-
-    for name in SURFACE_FIELDS + SECTOR_FIELDS:
-        variable = dataset[name]
+    for base in bases:
+        variable = dataset[base]
         if "SECTOR" in variable.dims:
             variable = variable.isel(SECTOR=ICE_SHEET_SECTOR)
-        planes.append(variable.values.astype(np.float32))
-
-    if include_profiles:
-        for base in PROFILE_FIELDS:
-            if base not in dataset:
-                continue
-            variable = dataset[base]
-            if "SECTOR" in variable.dims:
-                variable = variable.isel(SECTOR=ICE_SHEET_SECTOR)
-            dim = _level_dim(variable)
-            if dim is None:
-                planes.append(variable.values.astype(np.float32))
-            else:
-                for i in range(variable.sizes[dim]):
-                    planes.append(variable.isel({dim: i}).values.astype(np.float32))
-
+        dim = _level_dim(variable)
+        if dim is None:
+            planes.append(variable.values.astype(np.float32))
+        else:
+            for i in range(variable.sizes[dim]):
+                planes.append(variable.isel({dim: i}).values.astype(np.float32))
     return np.stack(planes, axis=1), dataset
 
 
@@ -171,7 +181,8 @@ def main() -> None:
         )
 
     include_profiles = not arguments.surface_only
-    field_names = expand_field_names(paths[0], include_profiles)
+    bases = available_bases(paths, include_profiles)
+    field_names = expand_field_names(paths[0], bases)
     print(f"{len(paths)} annual files, {len(field_names)} feature columns")
 
     feature_blocks, cell_blocks, day_blocks, year_blocks = [], [], [], []
@@ -179,7 +190,7 @@ def main() -> None:
     ice_cells: np.ndarray | None = None
 
     for path in paths:
-        stack, dataset = load_year(path, include_profiles)
+        stack, dataset = load_year(path, bases)
         if geometry is None:
             geometry = dataset
             ice_cells = (dataset["MSK"].values >= MINIMUM_ICE_PERCENT).ravel()
