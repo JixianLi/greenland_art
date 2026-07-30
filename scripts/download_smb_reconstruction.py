@@ -16,6 +16,7 @@ not evidence of independent predictive skill.
 """
 
 import argparse
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -25,31 +26,75 @@ OUTPUT_DIR = DATASETS_DIR / "smb_reconstruction"
 ZENODO_RECORD = "3359192"
 ZENODO_FILE_URL = "https://zenodo.org/api/records/{record}/files/{name}/content"
 
-# key -> (filename, exact size in bytes from the Zenodo API).
-# The exact size is what makes resume safe: a partial file from an interrupted
-# transfer is indistinguishable from a complete one by any size *floor*, so the
-# check has to be equality.
+# key -> (filename, exact size in bytes, published md5), all from the Zenodo API.
+# Size alone is not enough. A resumed transfer here came back 74 MB LONGER than
+# the published size: the content was byte-perfect but the server re-sent a
+# trailing chunk. netCDF reads by internal offset, so the file opened fine and
+# looked healthy. Only the checksum distinguishes "intact plus trailing junk"
+# from "corrupt in the middle", and the two need opposite responses -- truncate
+# versus re-download.
 BOX_FILES = {
-    "smb": ("Box_Greenland_SMB_monthly_1840-2012_5km_cal_ver20141007.nc", 1_405_602_152),
-    "melt": ("Box_Greenland_Melt_monthly_1840-2012_5km_cal_ver20140421.nc", 1_404_924_332),
-    "accumulation": ("Box_Greenland_C_monthly_1840-2012_5km_cal_ver20140421.nc", 1_404_924_332),
-    "rmse": ("Box_SMB_RMSE_1960-2012_monthly_v20140323.nc", 10_807_936),
+    "smb": (
+        "Box_Greenland_SMB_monthly_1840-2012_5km_cal_ver20141007.nc",
+        1_405_602_152, "b0ce03a50b7f3cb87405bb1dbc2db07c",
+    ),
+    "melt": (
+        "Box_Greenland_Melt_monthly_1840-2012_5km_cal_ver20140421.nc",
+        1_404_924_332, "edeb450cd9817865e51d0afa920d3ea6",
+    ),
+    "accumulation": (
+        "Box_Greenland_C_monthly_1840-2012_5km_cal_ver20140421.nc",
+        1_404_924_332, "c85e455c98a2245d1f10469045b09d93",
+    ),
+    "rmse": (
+        "Box_SMB_RMSE_1960-2012_monthly_v20140323.nc",
+        10_807_936, "f364a5db49e2e49b9d20395688862f9f",
+    ),
 }
 
 
-def download_file(name: str, expected_bytes: int, destination: Path) -> bool:
-    """Fetch with resume.
+def md5_of_prefix(path: Path, byte_count: int) -> str:
+    digest = hashlib.md5()
+    remaining = byte_count
+    with open(path, "rb") as handle:
+        while remaining > 0:
+            block = handle.read(min(8 << 20, remaining))
+            if not block:
+                break
+            remaining -= len(block)
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify(destination: Path, expected_bytes: int, expected_md5: str) -> bool:
+    """True if the file is byte-correct, truncating harmless trailing overrun."""
+    actual = destination.stat().st_size
+    if actual >= expected_bytes and md5_of_prefix(destination, expected_bytes) == expected_md5:
+        if actual > expected_bytes:
+            print(f"  trimming {actual - expected_bytes:,} trailing bytes from {destination.name}")
+            with open(destination, "r+b") as handle:
+                handle.truncate(expected_bytes)
+        return True
+    return False
+
+
+def download_file(name: str, expected_bytes: int, expected_md5: str, destination: Path) -> bool:
+    """Fetch with resume, then verify against the published checksum.
 
     curl rather than urllib because urlretrieve cannot resume: a crashed
     transfer leaves a partial file that has to be restarted from zero, and these
     are 1.4 GB each.
     """
     if destination.exists():
-        actual = destination.stat().st_size
-        if actual == expected_bytes:
-            print(f"  skip (complete)  {destination.name}")
+        if verify(destination, expected_bytes, expected_md5):
+            print(f"  skip (verified)  {destination.name}")
             return True
-        print(f"  resuming {destination.name} from {actual / 1e6:.0f} of {expected_bytes / 1e6:.0f} MB")
+        actual = destination.stat().st_size
+        if actual > expected_bytes:
+            print(f"  {destination.name} is oversized and corrupt; restarting")
+            destination.unlink()
+        else:
+            print(f"  resuming {destination.name} from {actual / 1e6:.0f} of {expected_bytes / 1e6:.0f} MB")
 
     command = [
         "curl", "-fSL", "-C", "-",
@@ -59,12 +104,15 @@ def download_file(name: str, expected_bytes: int, destination: Path) -> bool:
     ]
     result = subprocess.run(command)
 
-    actual = destination.stat().st_size if destination.exists() else 0
-    if result.returncode != 0 or actual != expected_bytes:
+    if not destination.exists():
+        print(f"  FAILED  {destination.name}: nothing written")
+        return False
+    if result.returncode != 0 or not verify(destination, expected_bytes, expected_md5):
+        actual = destination.stat().st_size
         print(f"  INCOMPLETE  {destination.name}: {actual:,} of {expected_bytes:,} B (resumable)")
         return False
 
-    print(f"  ok {actual / 1e6:>8.1f} MB  {destination.name}")
+    print(f"  ok {destination.stat().st_size / 1e6:>8.1f} MB  {destination.name}  md5 verified")
     return True
 
 
@@ -83,8 +131,8 @@ def main() -> None:
     print(f"Box (2013) SMB reconstruction -> {arguments.output_dir}")
     downloaded = 0
     for key in wanted:
-        name, expected_bytes = BOX_FILES[key]
-        downloaded += download_file(name, expected_bytes, arguments.output_dir / name)
+        name, expected_bytes, expected_md5 = BOX_FILES[key]
+        downloaded += download_file(name, expected_bytes, expected_md5, arguments.output_dir / name)
     print(f"\n{downloaded}/{len(wanted)} files complete")
 
 
