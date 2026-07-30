@@ -132,6 +132,72 @@ field on screen quickly, this is the fastest path.
 
 ---
 
+## 6. Ice thickness — what exists, and what does not
+
+Checked 2026-07-29 because "does CMIP have ice thickness for Greenland?" is a
+reasonable guess that turns out to be wrong in an important way.
+
+### CMIP6 has sea ice, not ice sheet
+
+ESGF dataset counts:
+
+| Variable | What | CMIP6 datasets |
+|---|---|---|
+| `siconc` | **sea** ice concentration | 68,026 |
+| `sithick` | **sea** ice thickness | 52,493 |
+| `lithk` | **land** ice sheet thickness | **210** |
+
+`sithick` is sea ice on the ocean grid — abundant, and the thing most people
+have already used. Greenland's ice sheet is `lithk`, and it is barely published:
+
+- **208 of the 210 are table `IfxGre`.** `fx` means time-invariant: a static
+  field with no time axis.
+- Only **2** are annual (`IyrGre`), both CESM2, both **100 km**, experiments
+  `1pctCO2-4xext` (model years 143–352) and `ssp585-withism`. Neither is a
+  historical run.
+- **NCAR is the only institution publishing any of it.**
+
+So CMIP6 cannot supply Greenland ice thickness over the ERA5 period. Not
+difficult — absent.
+
+### What can supply it
+
+| Product | Quantity | Period | Grid | Access |
+|---|---|---|---|---|
+| BedMachine v5 (NSIDC `IDBMG4`) | absolute thickness | **static** composite, 1993–2021 inputs | 150 m, EPSG:3413 | Earthdata (configured) |
+| CDS `satellite-ice-sheet-elevation-change` | d*h*/d*t* | **1992–present, monthly** | gridded | CDS + licence click |
+| CDS `satellite-ice-sheet-mass-balance` | mass change | 2003–2022, monthly | **per drainage basin** | CDS |
+| ITS_LIVE | surface velocity | 1985–present | gridded | none |
+
+Two things to keep straight:
+
+- **Elevation change is not thickness change.** d*h*/d*t* contains firn
+  compaction and bedrock motion; converting to mass needs a firn densification
+  model.
+- The usual construction is **BedMachine as the absolute t₀ thickness, evolved
+  by d*h*/d*t***. The resulting time-varying thickness field is assembled, not
+  directly observed — say so on any figure that uses it.
+
+### Temporal overlap with ERA5
+
+ERA5 starts **1940**; gridded ice observation starts **1992**. The overlap is
+~34 years. Nothing observational exists at grid scale for Greenland ice
+thickness before satellite altimetry.
+
+### The licence trap, concretely
+
+`satellite-ice-sheet-elevation-change` returns:
+
+```
+403 Client Error: Forbidden ... required licences not accepted
+```
+
+Accept once at
+<https://cds.climate.copernicus.eu/datasets/satellite-ice-sheet-elevation-change?tab=download#manage-licences>.
+Each CDS dataset has its own licence; accepting ERA5's does not cover this one.
+
+---
+
 ## Suggested order
 
 1. **ERA5 / Copernicus** — needed for the most things, slowest to set up.
