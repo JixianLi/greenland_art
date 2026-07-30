@@ -66,6 +66,17 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || echo "no nvidi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$SCRATCH/.uv-cache}"
 uv sync --frozen || uv sync
 
+# EXTRA_ARGS must be split into an array, not passed as one quoted word.
+# "${EXTRA_ARGS:-}" expands to a single EMPTY argument when unset, which
+# argparse rejects as an unrecognised argument -- and because it is empty, the
+# error prints nothing after the colon, which is a genuinely confusing failure.
+# The ${ARR[@]+"${ARR[@]}"} form is also required: a bare "${ARR[@]}" on an
+# empty array aborts under set -u in bash before 4.4.
+EXTRA_ARGS_ARRAY=()
+if [[ -n "${EXTRA_ARGS:-}" ]]; then
+    read -r -a EXTRA_ARGS_ARRAY <<< "$EXTRA_ARGS"
+fi
+
 # --max-samples caps the matrix for a quick shakeout run; drop it for the full
 # fit. UMAP is the slow stage by far, so it is worth confirming the rest works
 # with --skip-umap before spending the full walltime.
@@ -78,7 +89,7 @@ uv run python scripts/run_latent_comparison.py \
     --hidden 512 256 128 \
     --umap-subsample 150000 \
     --device cuda \
-    "${EXTRA_ARGS:-}"
+    ${EXTRA_ARGS_ARRAY[@]+"${EXTRA_ARGS_ARRAY[@]}"}
 
 echo "done: $OUTPUT_DIR"
 ls -lh "$OUTPUT_DIR"
