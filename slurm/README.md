@@ -29,6 +29,8 @@ this size needs, and consecutive days are highly correlated anyway.
 
 ```bash
 cd $SCRATCH/greenland_art
+export SBATCH_ACCOUNT=<your-allocation>
+sbatch --test-only slurm/latent_comparison.slurm   # confirm without queueing
 sbatch slurm/latent_comparison.slurm
 ```
 
@@ -44,8 +46,8 @@ immediately or silently queues forever:
 
 | Line | What to set |
 |---|---|
-| `-A` | your allocation. The job will not start without it. |
-| `-p` | `gpu-a100` on Lonestar6, `gh` on Vista. Confirm with `sinfo -s`. |
+| allocation | Not in the script. `export SBATCH_ACCOUNT=<alloc>`, or `sbatch -A <alloc>`. `#SBATCH` lines do not expand variables. |
+| `-p` | committed as `gh` (Vista). Use `gpu-a100` on Lonestar6, or `export SBATCH_PARTITION=...`. Confirm with `sinfo -s`. |
 | `module load` | TACC module names differ per system and change over time. |
 
 ## Vista versus Lonestar6

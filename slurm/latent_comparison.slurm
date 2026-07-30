@@ -11,9 +11,19 @@
 # its datasets/ directory. Override PROJECT_DIR, DATA or OUTPUT_DIR via
 # --export if the layout differs.
 #
+# The allocation is NOT set here. #SBATCH lines are parsed by sbatch as text
+# before any shell runs, so they do not expand variables -- "#SBATCH -A
+# $ALLOCATION" would submit the literal string. Set it in the environment
+# instead, which sbatch reads:
+#
+#   export SBATCH_ACCOUNT=<allocation>
+#   sbatch slurm/latent_comparison.slurm
+#
+# or pass it on the command line, which outranks both:  sbatch -A <alloc> ...
+#
 # VERIFY BEFORE SUBMITTING:
-#   -A            your allocation name (this will not run without it)
-#   -p            partition; check `sinfo -s` on the actual system
+#   SBATCH_ACCOUNT  exported, or -A given on the command line
+#   -p              partition; gh on Vista, gpu-a100 on Lonestar6 (`sinfo -s`)
 #   the module load line -- TACC module names change between systems
 #----------------------------------------------------------------------------
 #SBATCH -J greenland-latent
@@ -22,9 +32,9 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -t 04:00:00
-#SBATCH -p gpu-a100
-#SBATCH -A REPLACE_WITH_ALLOCATION
-#SBATCH --mail-type=END,FAIL
+#SBATCH -p gh
+#SBATCH --mail-user=jixianli@tacc.utexas.edu
+#SBATCH --mail-type=ALL
 
 # Vista (GH200) instead of Lonestar6: use -p gh (or gh-dev for short tests).
 # Vista is aarch64, so the uv-resolved torch wheel differs from Lonestar6's
