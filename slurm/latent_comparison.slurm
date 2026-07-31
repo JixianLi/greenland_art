@@ -108,6 +108,7 @@ uv run python scripts/run_latent_comparison.py \
     --batch-size 8192 \
     --hidden 512 256 128 \
     --umap-subsample 150000 \
+    --umap-parallel \
     --device cuda \
     ${EXTRA_ARGS_ARRAY[@]+"${EXTRA_ARGS_ARRAY[@]}"}
 

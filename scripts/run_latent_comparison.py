@@ -65,6 +65,11 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--skip-umap", action="store_true")
+    parser.add_argument(
+        "--umap-parallel", action="store_true",
+        help="Run UMAP multi-threaded. Roughly 7x faster on 14 cores, more on a "
+             "larger node, at the cost of bit-identical reproducibility.",
+    )
     arguments = parser.parse_args()
 
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
@@ -89,6 +94,7 @@ def main() -> None:
         "n_features": int(n_features),
         "field_names": [str(f) for f in field_names],
         "latent_dims": usable,
+        "umap_deterministic": not arguments.umap_parallel,
         "pca": {},
         "autoencoder": {},
     }
@@ -142,24 +148,44 @@ def main() -> None:
         autoencoder.save(arguments.output_dir / f"mlp_autoencoder_latent{latent_dim}.pt")
         latents[latent_dim] = autoencoder.encode(validation)
 
-    # 2D views of each latent space, plus of the raw input for reference.
+    # One fixed subsample drives every 2D view. Three reasons to embed only
+    # these rows rather than fit on a subsample and transform the rest: UMAP's
+    # transform() costs about as much as the fit and is lower fidelity; a
+    # 300k-point scatter overplots into a solid blob regardless; and sharing one
+    # point set across panels makes them directly comparable.
+    plot_count = min(arguments.umap_subsample, len(validation))
+    plot_index = np.random.default_rng(arguments.seed).choice(
+        len(validation), plot_count, replace=False
+    )
+    plot_index.sort()
+    mode = "parallel, not reproducible" if arguments.umap_parallel else "single-thread, reproducible"
+    print(
+        f"\n2D views over {plot_count:,} of {len(validation):,} validation rows "
+        f"(UMAP: {mode})", flush=True,
+    )
+
     projections = {}
-    for label, matrix in [("input", validation)] + [(f"latent{d}", z) for d, z in latents.items()]:
+    views = [("input", validation[plot_index])]
+    views += [(f"latent{d}", z[plot_index]) for d, z in latents.items()]
+
+    for label, matrix in views:
         projections[f"{label}_pca2"] = PCAModel(2, seed=arguments.seed).fit_encode(matrix)
         if not arguments.skip_umap:
             started = time.time()
             projections[f"{label}_umap2"] = UMAPProjection(
-                2, seed=arguments.seed, subsample=arguments.umap_subsample
-            ).fit(matrix).encode(matrix)
+                2, seed=arguments.seed, subsample=None,
+                deterministic=not arguments.umap_parallel,
+            ).fit_encode(matrix)
             print(f"UMAP on {label}: {time.time() - started:.0f}s", flush=True)
 
     np.savez_compressed(
         arguments.output_dir / "projections.npz",
         **{k: v.astype(np.float32) for k, v in projections.items()},
+        plot_index=plot_index.astype(np.int32),
         validation_index=validation_index.astype(np.int32),
-        cell_index=meta["cell_index"][validation_index],
-        day_of_year=meta["day_of_year"][validation_index],
-        year=meta["year"][validation_index],
+        cell_index=meta["cell_index"][validation_index][plot_index],
+        day_of_year=meta["day_of_year"][validation_index][plot_index],
+        year=meta["year"][validation_index][plot_index],
     )
     with open(arguments.output_dir / "results.json", "w") as handle:
         json.dump(results, handle, indent=2)

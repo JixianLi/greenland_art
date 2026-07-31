@@ -59,8 +59,8 @@ way at import time rather than at sync time.
 
 ## Shakeout first
 
-UMAP dominates the wall clock. Confirm the rest of the pipeline runs before
-spending the full allocation:
+UMAP dominates the wall clock, though far less than it used to — see below.
+Confirm the rest of the pipeline runs before spending the full allocation:
 
 ```bash
 sbatch --export=ALL,EXTRA_ARGS="--max-samples 200000 --epochs 5 --skip-umap" \
@@ -80,3 +80,36 @@ tracked figures already in `outputs/`:
 - `mlp_autoencoder_latent{15,30,100}.pt` — trained weights
 
 Copy `results.json` and `projections.npz` back; the figures are built locally.
+
+## Why UMAP is no longer the bottleneck
+
+Two changes, both measured on this hardware (14 cores):
+
+**Embed a fixed subsample rather than fitting on one and transforming the rest
+— 3.8x.** UMAP's `transform()` places unseen points into a layout that is
+already frozen; it costs about as much as the fit and is lower fidelity than
+letting those points take part in the optimisation. For a scatter plot there is
+no reason to pay for it, and 300k points overplot into a solid blob anyway. The
+same fixed subsample now drives every panel, which also makes them directly
+comparable.
+
+**Let UMAP use more than one thread — 7.4x.** `umap-learn` silently forces
+`n_jobs=1` whenever `random_state` is set, because its layout optimisation is
+order-dependent and therefore not reproducible in parallel. The only sign is a
+warning most people never read. `--umap-parallel` gives up bit-identical output
+for the parallelism, which is a reasonable trade for a 2D view and a bad one for
+anything a number is read off. `results.json` records which mode was used.
+
+On a node with many more cores the second factor should be larger still.
+
+## If it is still too slow
+
+RAPIDS `cuml.UMAP` runs the whole thing on the GPU and publishes **aarch64
+wheels**, so it installs on Vista:
+
+    uv pip install cuml-cu13
+
+It is API-compatible enough to drop into `UMAPProjection`, but results are not
+identical to `umap-learn` — different RNG and a different approximate-nearest-
+neighbour backend. Untested here; there is no GPU on the machine this was
+written on.
