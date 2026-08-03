@@ -75,36 +75,3 @@ class ReconstructiveModel(LatentModel):
         residual_variance = float(np.mean((self.reconstruct(features) - features) ** 2))
         total_variance = float(np.mean((features - features.mean(axis=0)) ** 2))
         return 1.0 - residual_variance / total_variance
-
-
-class StandardScalerState:
-    """Mean/std standardisation fitted on training data only.
-
-    Kept as an explicit object rather than a sklearn transformer because the
-    same statistics have to travel with the model to the GPU job and back, and
-    because the fields differ by orders of magnitude -- radiative fluxes in
-    hundreds of W/m2 against cloud concentrations of 1e-5 kg/kg. Without
-    per-field standardisation the reconstruction loss is dominated by whichever
-    field happens to carry the largest units.
-    """
-
-    def __init__(self, mean: np.ndarray, scale: np.ndarray):
-        self.mean = mean
-        self.scale = scale
-
-    @classmethod
-    def fit(cls, features: np.ndarray) -> "StandardScalerState":
-        # float64 accumulation: summing millions of float32 values overflows
-        # silently to inf, which then propagates as NaN through the division.
-        mean = features.mean(axis=0, dtype=np.float64)
-        scale = features.std(axis=0, dtype=np.float64)
-        # A constant field would divide by zero; leaving it at 1.0 maps it to a
-        # constant zero column, which every model handles harmlessly.
-        scale[scale == 0.0] = 1.0
-        return cls(mean, scale)
-
-    def transform(self, features: np.ndarray) -> np.ndarray:
-        return (features - self.mean) / self.scale
-
-    def inverse_transform(self, features: np.ndarray) -> np.ndarray:
-        return features * self.scale + self.mean

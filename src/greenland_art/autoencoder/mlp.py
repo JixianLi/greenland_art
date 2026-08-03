@@ -55,11 +55,11 @@ class _SymmetricAutoencoder(nn.Module):
 
 
 class MLPAutoencoder(ReconstructiveModel):
-    """Dense autoencoder trained with mean squared error on standardised inputs.
+    """Dense autoencoder trained with mean squared error on normalised inputs.
 
-    The caller is expected to have standardised `features` already (see
-    StandardScalerState); the model does not rescale internally, so that PCA,
-    UMAP and this model all see identical inputs.
+    The caller is expected to have normalised `features` already (see
+    Normalization); the model does not rescale internally, so that PCA, UMAP and
+    this model all see identical inputs.
     """
 
     def __init__(

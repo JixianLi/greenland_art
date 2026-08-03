@@ -50,6 +50,52 @@ immediately or silently queues forever:
 | `-p` | committed as `gh` (Vista). Use `gpu-a100` on Lonestar6, or `export SBATCH_PARTITION=...`. Confirm with `sinfo -s`. |
 | `MODULES` | committed as `gcc/15.1.0 cuda/13.1` (Vista). Versions are pinned on purpose; bare `gcc cuda` takes the drifting site default. Override with `--export=ALL,MODULES="..."`. |
 
+## Normalisation arms
+
+Four schemes, selected with `--normalization`. Run them as four jobs; each lands
+in its own `outputs/<jobid>/` and records its scheme in `results.json`.
+
+```bash
+for scheme in zscore log1p_zscore minmax log1p_minmax; do
+    sbatch --export=ALL,EXTRA_ARGS="--normalization $scheme" slurm/latent_comparison.slurm
+done
+```
+
+`log1p_*` is **not** plain `log1p`. It is `sign(x) * log1p(|x| / s)` with `s` a
+robust per-column scale, for two measured reasons: 60 of the 155 columns take
+negative values, where `log1p` is undefined; and 26 columns have 99th-percentile
+magnitudes below 0.1 in their native units, where `log1p` is the identity to
+several decimal places. Cloud ice `QI` spans 7.7e-14 to 3.2e-6 kg/kg and plain
+`log1p` leaves its dynamic range at 3.3 decades, unchanged. See
+`src/greenland_art/autoencoder/normalization.py`.
+
+`minmax` uses the true column min and max, so a single outlier sets the range.
+That is deliberate — it is the honest behaviour of a linear rescale on columns
+whose standardised extremes reach |z| = 448.
+
+### Reading the results across arms
+
+Explained variance ratio is **not comparable between schemes**: z-score gives
+every column one unit of variance, min-max gives a heavy-tailed column almost
+none. Use `physical_column_r2` instead, which inverts the normalisation and
+scores each column in its original physical units — the one ruler outside all
+four schemes.
+
+Report its **median**, not its mean. The log arms reconstruct the typical column
+slightly better than z-score while destroying a few: in a 60k-sample shakeout,
+`log1p_zscore` PCA(15) scored median 0.879 against z-score's 0.863, but `RZ_L00`
+came back at **-9526**. A small error in log space is a multiplicative error
+after `expm1`, which is ruinous for a zero-inflated column with a wide range.
+`physical_column_r2.columns_below_zero` is the number to watch.
+
+### One confound to check, not assume
+
+The MLP hyperparameters were chosen against z-scored inputs. Under min-max the
+targets carry roughly 35x less variance, and the network starts much further
+from them, so it needs more epochs to reach the same place. If a min-max arm
+stops at `epochs_run == --epochs` rather than early-stopping, it was still
+improving and its score understates the scheme rather than measuring it.
+
 ## Vista versus Lonestar6
 
 Vista is **aarch64** (GH200); Lonestar6 GPU nodes are **x86_64** (A100). The

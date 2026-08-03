@@ -24,13 +24,40 @@ from pathlib import Path
 import numpy as np
 
 from greenland_art.autoencoder import (
+    SCHEMES,
     MLPAutoencoder,
+    Normalization,
     PCAModel,
-    StandardScalerState,
     UMAPProjection,
 )
 
 DEFAULT_LATENT_DIMS = (15, 30, 100)
+
+
+def physical_column_r2(model, validation, raw_validation, normalization) -> np.ndarray:
+    """Per-column R^2 after mapping the reconstruction back to physical units.
+
+    The explained variance ratio reported elsewhere is measured in whatever
+    space the normalisation created, and those spaces are not comparable: z-score
+    gives every column one unit of variance, min-max gives a heavy-tailed column
+    almost none because one outlier sets its range. Ranking normalisation schemes
+    against each other needs a ruler outside all of them, which is the original
+    physical units of the data.
+    """
+    reconstruction = normalization.inverse_transform(model.reconstruct(validation))
+    raw = raw_validation.astype(np.float64)
+    residual = ((raw - reconstruction) ** 2).sum(axis=0)
+    total = ((raw - raw.mean(axis=0)) ** 2).sum(axis=0)
+    return 1.0 - residual / np.where(total > 0.0, total, 1.0)
+
+
+def summarise_physical(scores: np.ndarray) -> dict:
+    return {
+        "mean": float(np.mean(scores)),
+        "median": float(np.median(scores)),
+        "worst": float(np.min(scores)),
+        "columns_below_zero": int((scores < 0.0).sum()),
+    }
 
 
 def load_matrix(path: Path, max_samples: int | None, seed: int):
@@ -64,6 +91,10 @@ def main() -> None:
     parser.add_argument("--umap-subsample", type=int, default=100_000)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--normalization", choices=list(SCHEMES), default="zscore",
+        help="input scaling; see greenland_art.autoencoder.normalization",
+    )
     parser.add_argument("--skip-umap", action="store_true")
     parser.add_argument(
         "--umap-parallel", action="store_true",
@@ -84,16 +115,22 @@ def main() -> None:
         print(f"dropping latent dims {dropped}: exceed n_features={n_features}", flush=True)
 
     train_index, validation_index = split(n_samples, 0.1, arguments.seed)
-    scaler = StandardScalerState.fit(features[train_index])
-    train = scaler.transform(features[train_index])
-    validation = scaler.transform(features[validation_index])
-    print(f"train {len(train):,}  validation {len(validation):,}", flush=True)
+    normalization = Normalization.fit(features[train_index], arguments.normalization, arguments.seed)
+    train = normalization.transform(features[train_index])
+    raw_validation = features[validation_index]
+    validation = normalization.transform(raw_validation)
+    print(
+        f"train {len(train):,}  validation {len(validation):,}  "
+        f"normalization {arguments.normalization}",
+        flush=True,
+    )
 
     results = {
         "n_samples": int(n_samples),
         "n_features": int(n_features),
         "field_names": [str(f) for f in field_names],
         "latent_dims": usable,
+        "normalization": arguments.normalization,
         "umap_deterministic": not arguments.umap_parallel,
         "pca": {},
         "autoencoder": {},
@@ -106,18 +143,24 @@ def main() -> None:
         started = time.time()
         pca = PCAModel(latent_dim, seed=arguments.seed).fit(train)
         ratios = pca.explained_variance_ratio_per_component
+        pca_physical = physical_column_r2(pca, validation, raw_validation, normalization)
         results["pca"][str(latent_dim)] = {
             "explained_variance_ratio_per_component": [float(v) for v in ratios],
             "cumulative_explained_variance_ratio": [float(v) for v in np.cumsum(ratios)],
             "total_explained_variance_ratio": float(ratios.sum()),
             "validation_explained_variance_ratio": pca.explained_variance_ratio(validation),
             "validation_mse": pca.mean_squared_error(validation),
+            "physical_column_r2": summarise_physical(pca_physical),
+            "physical_column_r2_per_column": [float(v) for v in pca_physical],
             "fit_seconds": time.time() - started,
         }
         print(
             f"PCA({latent_dim}): total EVR {ratios.sum():.4f}  "
             f"val EVR {pca.explained_variance_ratio(validation):.4f}  "
-            f"val MSE {pca.mean_squared_error(validation):.5f}",
+            f"val MSE {pca.mean_squared_error(validation):.5f}  "
+            f"physical col R2 mean {pca_physical.mean():.4f} "
+            f"median {np.median(pca_physical):.4f} "
+            f"(<0: {int((pca_physical < 0).sum())})",
             flush=True,
         )
         print(f"  first 10 component ratios: {np.round(ratios[:10], 4).tolist()}", flush=True)
@@ -131,9 +174,14 @@ def main() -> None:
             device=arguments.device,
             seed=arguments.seed,
         ).fit(train)
+        autoencoder_physical = physical_column_r2(
+            autoencoder, validation, raw_validation, normalization
+        )
         results["autoencoder"][str(latent_dim)] = {
             "validation_explained_variance_ratio": autoencoder.explained_variance_ratio(validation),
             "validation_mse": autoencoder.mean_squared_error(validation),
+            "physical_column_r2": summarise_physical(autoencoder_physical),
+            "physical_column_r2_per_column": [float(v) for v in autoencoder_physical],
             "hidden_sizes": list(arguments.hidden),
             "epochs_run": len(autoencoder.history),
             "history": autoencoder.history,
@@ -142,7 +190,10 @@ def main() -> None:
         print(
             f"MLP-AE({latent_dim}): val EVR "
             f"{autoencoder.explained_variance_ratio(validation):.4f}  "
-            f"val MSE {autoencoder.mean_squared_error(validation):.5f}",
+            f"val MSE {autoencoder.mean_squared_error(validation):.5f}  "
+            f"physical col R2 mean {autoencoder_physical.mean():.4f} "
+            f"median {np.median(autoencoder_physical):.4f} "
+            f"(<0: {int((autoencoder_physical < 0).sum())})",
             flush=True,
         )
         autoencoder.save(arguments.output_dir / f"mlp_autoencoder_latent{latent_dim}.pt")
