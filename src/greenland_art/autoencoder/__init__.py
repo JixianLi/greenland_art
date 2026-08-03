@@ -7,6 +7,7 @@ encoder can be added later without changing any caller.
 from .base import LatentModel, ReconstructiveModel
 from .baselines import PCAModel, UMAPProjection
 from .normalization import SCHEMES, Normalization
+from .saved_run import SavedRun
 from .mlp import MLPAutoencoder
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "PCAModel",
     "UMAPProjection",
     "MLPAutoencoder",
+    "SavedRun",
 ]

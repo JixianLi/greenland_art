@@ -140,6 +140,7 @@ def main() -> None:
     train = normalization.transform(features[train_index])
     raw_validation = features[validation_index]
     validation = normalization.transform(raw_validation)
+    normalization.save(arguments.output_dir / "normalization.npz")
     print(
         f"train {len(train):,}  validation {len(validation):,}  "
         f"normalization {arguments.normalization}",
@@ -203,6 +204,7 @@ def main() -> None:
             flush=True,
         )
         print(f"  first 10 component ratios: {np.round(ratios[:10], 4).tolist()}", flush=True)
+        pca.save(arguments.output_dir / f"pca_latent{latent_dim}.npz")
         examples[f"pca{latent_dim}"] = normalization.inverse_transform(
             pca.reconstruct(example_transformed)
         ).astype(np.float32)

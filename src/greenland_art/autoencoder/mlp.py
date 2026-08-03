@@ -206,7 +206,35 @@ class MLPAutoencoder(ReconstructiveModel):
                 "state_dict": self.module.state_dict(),
                 "latent_dim": self._latent_dim,
                 "hidden_sizes": self.hidden_sizes,
+                "n_features": self.module.encoder[0].in_features,
                 "history": self.history,
             },
             path,
         )
+
+    @classmethod
+    def load(cls, path: Path, device: str = "auto") -> "MLPAutoencoder":
+        """Rebuild a fitted model for inference.
+
+        Reconstructing on demand from a 2 MB checkpoint is what makes the run
+        artefacts small: saving every model's output over the full matrix would
+        be 2.1 GB per model, against 12 MB for all six checkpoints.
+        """
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        hidden_sizes = tuple(payload["hidden_sizes"])
+        model = cls(
+            payload["latent_dim"], hidden_sizes=hidden_sizes, device=device, verbose=False
+        )
+        # Checkpoints written before n_features was recorded still carry it in
+        # the shape of the first encoder weight.
+        n_features = payload.get("n_features") or payload["state_dict"]["encoder.0.weight"].shape[1]
+        model.module = _SymmetricAutoencoder(
+            int(n_features), payload["latent_dim"], hidden_sizes
+        ).to(model.device)
+        model.module.load_state_dict(payload["state_dict"])
+        # eval() matters: BatchNorm in training mode would normalise each batch
+        # by its own statistics, so a reconstruction would depend on what else
+        # happened to be in the batch.
+        model.module.eval()
+        model.history = payload.get("history", [])
+        return model

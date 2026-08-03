@@ -117,3 +117,19 @@ class Normalization:
 
     def inverse_transform(self, values: np.ndarray) -> np.ndarray:
         return self._expand(values * self.denominator + self.offset, self.log_scale)
+
+    def save(self, path) -> None:
+        arrays = {"offset": self.offset, "denominator": self.denominator}
+        if self.log_scale is not None:
+            arrays["log_scale"] = self.log_scale
+        np.savez(path, scheme=np.array(self.scheme), **arrays)
+
+    @classmethod
+    def load(cls, path) -> "Normalization":
+        archive = np.load(path, allow_pickle=False)
+        return cls(
+            str(archive["scheme"]),
+            archive["log_scale"] if "log_scale" in archive.files else None,
+            archive["offset"],
+            archive["denominator"],
+        )

@@ -48,6 +48,36 @@ class PCAModel(ReconstructiveModel):
     def cumulative_explained_variance_ratio(self) -> np.ndarray:
         return np.cumsum(self._pca.explained_variance_ratio_)
 
+    def save(self, path) -> None:
+        """Persist as plain arrays rather than a pickled estimator.
+
+        A pickled sklearn object is tied to the version that wrote it and would
+        have to be loaded with allow_pickle, which the rest of this project
+        refuses on principle. Everything transform and inverse_transform need is
+        in these four arrays.
+        """
+        np.savez(
+            path,
+            components=self._pca.components_,
+            mean=self._pca.mean_,
+            explained_variance=self._pca.explained_variance_,
+            explained_variance_ratio=self._pca.explained_variance_ratio_,
+        )
+
+    @classmethod
+    def load(cls, path) -> "PCAModel":
+        archive = np.load(path, allow_pickle=False)
+        components = archive["components"]
+        model = cls(components.shape[0])
+        fitted = model._pca
+        fitted.components_ = components
+        fitted.mean_ = archive["mean"]
+        fitted.explained_variance_ = archive["explained_variance"]
+        fitted.explained_variance_ratio_ = archive["explained_variance_ratio"]
+        fitted.n_components_ = components.shape[0]
+        fitted.n_features_in_ = components.shape[1]
+        return model
+
 
 class UMAPProjection(LatentModel):
     """Neighbour-preserving embedding, used for visualisation only.
