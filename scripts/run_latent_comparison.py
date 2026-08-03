@@ -51,6 +51,23 @@ def physical_column_r2(model, validation, raw_validation, normalization) -> np.n
     return 1.0 - residual / np.where(total > 0.0, total, 1.0)
 
 
+def reconstruction_sample_index(meta, target_days, requested_year=None):
+    """Indices of every sample on a few whole days, so examples form full maps.
+
+    Reconstruction quality is judged by eye on a map, and a map needs every ice
+    cell. Taking whole days rather than a random draw is what makes that
+    possible. The cost is that most of those cells were in training -- the split
+    is random over samples, so roughly 90 % of any given day is -- which is why
+    the validation membership travels with the arrays and the error figures
+    quoted later are computed on that subset alone.
+    """
+    years = meta["year"]
+    year = int(years.max()) if requested_year is None else requested_year
+    available = np.unique(meta["day_of_year"][years == year])
+    days = sorted({int(available[np.abs(available - target).argmin()]) for target in target_days})
+    return np.flatnonzero((years == year) & np.isin(meta["day_of_year"], days)), year, days
+
+
 def summarise_physical(scores: np.ndarray) -> dict:
     return {
         "mean": float(np.mean(scores)),
@@ -95,6 +112,10 @@ def main() -> None:
         "--normalization", choices=list(SCHEMES), default="zscore",
         help="input scaling; see greenland_art.autoencoder.normalization",
     )
+    parser.add_argument(
+        "--reconstruction-days", type=int, nargs="+", default=[15, 195, 260],
+        help="days of year to save full-map reconstruction examples for",
+    )
     parser.add_argument("--skip-umap", action="store_true")
     parser.add_argument(
         "--umap-parallel", action="store_true",
@@ -137,6 +158,24 @@ def main() -> None:
     }
     latents = {}
 
+    example_index, example_year, example_days = reconstruction_sample_index(
+        meta, arguments.reconstruction_days
+    )
+    example_transformed = normalization.transform(features[example_index])
+    examples = {
+        "truth": features[example_index].astype(np.float32),
+        "cell_index": meta["cell_index"][example_index],
+        "day_of_year": meta["day_of_year"][example_index],
+        "year": meta["year"][example_index],
+        "is_validation": np.isin(example_index, validation_index),
+    }
+    print(
+        f"reconstruction examples: {len(example_index):,} samples, "
+        f"year {example_year}, days {example_days} "
+        f"({int(examples['is_validation'].sum()):,} held out)",
+        flush=True,
+    )
+
     for latent_dim in usable:
         print(f"\n=== latent {latent_dim} ===", flush=True)
 
@@ -164,6 +203,9 @@ def main() -> None:
             flush=True,
         )
         print(f"  first 10 component ratios: {np.round(ratios[:10], 4).tolist()}", flush=True)
+        examples[f"pca{latent_dim}"] = normalization.inverse_transform(
+            pca.reconstruct(example_transformed)
+        ).astype(np.float32)
 
         started = time.time()
         autoencoder = MLPAutoencoder(
@@ -198,6 +240,9 @@ def main() -> None:
         )
         autoencoder.save(arguments.output_dir / f"mlp_autoencoder_latent{latent_dim}.pt")
         latents[latent_dim] = autoencoder.encode(validation)
+        examples[f"autoencoder{latent_dim}"] = normalization.inverse_transform(
+            autoencoder.reconstruct(example_transformed)
+        ).astype(np.float32)
 
     # One fixed subsample drives every 2D view. Three reasons to embed only
     # these rows rather than fit on a subsample and transform the rest: UMAP's
@@ -238,10 +283,21 @@ def main() -> None:
         day_of_year=meta["day_of_year"][validation_index][plot_index],
         year=meta["year"][validation_index][plot_index],
     )
+    np.savez_compressed(
+        arguments.output_dir / "reconstructions.npz",
+        field_names=np.array([str(f) for f in field_names]),
+        example_year=example_year,
+        example_days=np.array(example_days),
+        **examples,
+    )
     with open(arguments.output_dir / "results.json", "w") as handle:
         json.dump(results, handle, indent=2)
 
-    print(f"\nWrote {arguments.output_dir}/results.json and projections.npz", flush=True)
+    print(
+        f"\nWrote {arguments.output_dir}/results.json, projections.npz "
+        f"and reconstructions.npz",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

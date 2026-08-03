@@ -123,9 +123,23 @@ tracked figures already in `outputs/`:
   each latent width, autoencoder validation EVR and MSE, and the full training
   history
 - `projections.npz` — 2D PCA and 2D UMAP of the input and of each latent space
+- `reconstructions.npz` — full-map reconstruction examples in physical units:
+  truth plus every PCA and autoencoder output for three whole days, with the
+  validation membership of each cell so error can be quoted on held-out cells
+  alone. Whole days rather than a random draw, because a reconstruction is
+  judged on a map and a map needs every ice cell.
 - `mlp_autoencoder_latent{15,30,100}.pt` — trained weights
 
-Copy `results.json` and `projections.npz` back; the figures are built locally.
+Copy the three `.json`/`.npz` files back; the figures are built locally with
+
+```bash
+uv run python scripts/plot_latent_comparison.py --run-dir outputs/<jobid>
+```
+
+which writes `latent_structure.png` (both projections of every latent width,
+each coloured by season and by elevation), `latent_variance.png` and
+`reconstruction_day<N>.png`. Use `--example-fields` and `--example-day` to
+re-render other fields or either of the other two saved days.
 
 ## Why UMAP is no longer the bottleneck
 
