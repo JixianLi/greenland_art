@@ -130,6 +130,41 @@ tracked figures already in `outputs/`:
   judged on a map and a map needs every ice cell.
 - `mlp_autoencoder_latent{15,30,100}.pt` — trained weights
 
+- `normalization.npz`, `pca_latent*.npz` — the fitted scaling and PCA state
+
+Copy the whole run directory back — it is ~25 MB. Nothing stores what the models
+*output*: six full reconstructions of the matrix would be 14.6 GB, against 12 MB
+for the six checkpoints, so reconstructions are recomputed locally on demand from
+the checkpoints plus the training matrix (`greenland_art.autoencoder.SavedRun`).
+
+### Error boxplots and the per-variable latent views
+
+```bash
+uv run python scripts/plot_error_summary.py --run-dir outputs/<jobid>
+uv run python scripts/plot_latent_by_variable.py --run-dir outputs/<jobid>
+```
+
+The first writes `error_summary/<variable>/{timestep,year,day,year_month,month}.png`
+— absolute error aggregated over the ice sheet at each time, six models as rows,
+symlog y axis. 775 figures for all 155 variables; the first call caches
+`error_statistics.npz`, which is the slow part. The second writes
+`latent_by_variable/<variable>.png`, the PCA and UMAP views of every latent
+width coloured by that variable's physical value, which shows which variables
+the bottleneck organised itself by.
+
+Both take `--fields` to render a subset.
+
+### Interactive viewer
+
+```bash
+uv run bokeh serve --show scripts/reconstruction_explorer.py -- --run-dir outputs/<jobid>
+```
+
+Pick a model, a variable and a timestep; truth, prediction and |difference| are
+computed live. This replaces rendering the 688,200 static frames those choices
+span (103 GB). Colour limits are fixed over the whole decade rather than per
+timestep, so scrubbing shows the field change and not the colour bar.
+
 Copy the three `.json`/`.npz` files back; the figures are built locally with
 
 ```bash
