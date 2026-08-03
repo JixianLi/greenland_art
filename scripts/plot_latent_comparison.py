@@ -3,13 +3,14 @@
 
 Two figures, answering two different questions:
 
-  latent_structure.png  Does the latent space organise itself into anything a
-                        glaciologist would recognise? The same 150k points are
+  latent_structure.png  What does the bottleneck keep? The same 150k points are
                         drawn four times -- raw input and each latent width --
-                        and coloured twice: by day of year, and by surface
-                        elevation. Nothing in the training told the model about
-                        either. Structure that lines up with those colours was
-                        found, not supplied.
+                        and coloured twice, by day of year and by surface
+                        elevation. Neither is a column of the input matrix, but
+                        they are not equivalent evidence and the figure labels
+                        the difference: elevation is recoverable from the inputs
+                        exactly, day of year is not. See SEASON_CAVEAT and
+                        ELEVATION_CAVEAT for the measured numbers.
 
   latent_variance.png   How much does the nonlinearity actually buy? PCA's
                         cumulative explained variance is the ruler; each
@@ -39,6 +40,23 @@ SOURCE_NOTE = (
     "155 fields per ice-sheet cell, standardised. Latent spaces from an MLP "
     "autoencoder; 2D views by UMAP (neighbourhood-preserving: distances and "
     "cluster sizes are not meaningful)."
+)
+
+# The two colourings are not equally impressive, and the figure has to say so.
+# Elevation is in the inputs in all but name: ZZ_L00, the height of the lowest
+# atmospheric level, tracks surface elevation at R^2 = 1.0000, and SP at 0.9942.
+# Day of year is not an input, and no single field determines it -- the best,
+# SWD, fits a one-harmonic annual cycle at R^2 = 0.875 (median over ice cells),
+# and one harmonic is symmetric about the solstice, so even a perfect fit leaves
+# spring and autumn indistinguishable. Recovering the date needs several fields
+# and the melt-season hysteresis that breaks that symmetry.
+SEASON_CAVEAT = (
+    "not an input.\nNo single field fixes it:\nSWD annual cycle $R^2$=0.88,\n"
+    "and one harmonic cannot\ntell spring from autumn."
+)
+ELEVATION_CAVEAT = (
+    "effectively an input:\nZZ_L00 $R^2$=1.00, SP 0.99.\n"
+    "Preserved, not discovered."
 )
 
 MINIMUM_ICE_PERCENT = 50.0
@@ -78,6 +96,7 @@ def draw_season_key(cell) -> None:
     bar.set_xticks(MONTH_START_DAY[::2])
     bar.set_xticklabels(MONTH_LABEL[::2], fontsize=7)
     bar.set_title("day of year", fontsize=9, pad=4)
+    cell.text(0.5, 0.33, SEASON_CAVEAT, fontsize=6.5, color="0.35", ha="center", va="top")
 
 
 def draw_elevation_key(cell, surface_height, ice_mask) -> None:
@@ -87,13 +106,13 @@ def draw_elevation_key(cell, surface_height, ice_mask) -> None:
     map_axes = cell.inset_axes([0.05, 0.20, 0.90, 0.72])
     image = map_axes.imshow(field, origin="lower", cmap=ELEVATION_COLORMAP, aspect="equal")
     map_axes.axis("off")
-    map_axes.set_title("surface elevation", fontsize=9, pad=4)
+    map_axes.set_title("surface elevation (m)", fontsize=9, pad=4)
 
-    bar_axes = cell.inset_axes([0.15, 0.13, 0.70, 0.028])
+    bar_axes = cell.inset_axes([0.15, 0.165, 0.70, 0.028])
     bar = cell.figure.colorbar(image, cax=bar_axes, orientation="horizontal")
     bar.set_ticks([0, 1000, 2000, 3000])
     bar.ax.tick_params(labelsize=7)
-    bar.set_label("m", fontsize=7, labelpad=1)
+    cell.text(0.5, 0.085, ELEVATION_CAVEAT, fontsize=6.5, color="0.35", ha="center", va="top")
 
 
 def draw_embedding(axes, points, colours, colormap, limits, title: str | None) -> None:
@@ -158,7 +177,7 @@ def plot_structure(
             )
 
     figure.suptitle(
-        "MLP autoencoder latent spaces: season and elevation were never given to the model",
+        "A 155-field point-wise autoencoder: what survives the bottleneck",
         fontsize=12,
     )
     figure.text(0.01, 0.005, source_note, fontsize=7, color="0.35", va="bottom")
