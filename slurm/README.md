@@ -36,8 +36,8 @@ sbatch slurm/latent_comparison.slurm
 
 Defaults: `PROJECT_DIR=$SCRATCH/greenland_art`,
 `DATA=$PROJECT_DIR/datasets/mar_training_2000_2009.npz`,
-`OUTPUT_DIR=$PROJECT_DIR/outputs/<jobid>`. Override any of them with `--export`. The
-script checks the matrix exists before doing anything else, so a wrong path
+`OUTPUT_DIR=$PROJECT_DIR/outputs/<jobid>_<scheme>`, `NORMALIZATION=zscore`.
+Override any of them with `--export`. The script checks the matrix exists before doing anything else, so a wrong path
 fails in seconds rather than after the environment resolves.
 
 Three things in the script **must** be checked before the first submission —
@@ -53,13 +53,24 @@ immediately or silently queues forever:
 ## Normalisation arms
 
 Four schemes, selected with `--normalization`. Run them as four jobs; each lands
-in its own `outputs/<jobid>/` and records its scheme in `results.json`.
+in its own `outputs/<jobid>_<scheme>/` and records its scheme in `results.json`.
 
 ```bash
 for scheme in zscore log1p_zscore minmax log1p_minmax; do
-    sbatch --export=ALL,EXTRA_ARGS="--normalization $scheme" slurm/latent_comparison.slurm
+    sbatch -J "latent-$scheme" --export=ALL,NORMALIZATION=$scheme \
+           slurm/latent_comparison.slurm
 done
 ```
+
+The scheme lands in the output directory name — `outputs/<jobid>_<scheme>/` — so
+four arms of the same experiment are distinguishable without looking up job ids.
+`-J` does the same for `squeue`; the `#SBATCH -J` line cannot, because those are
+parsed as text before any shell runs and do not expand variables.
+
+Set the scheme with `NORMALIZATION=`, **not** inside `EXTRA_ARGS`. `EXTRA_ARGS`
+is appended last, so argparse would take it over the explicit flag and the run
+would be correct while its directory name said otherwise. The script checks for
+this and refuses to start.
 
 `log1p_*` is **not** plain `log1p`. It is `sign(x) * log1p(|x| / s)` with `s` a
 robust per-column scale, for two measured reasons: 60 of the 155 columns take
@@ -115,7 +126,7 @@ sbatch --export=ALL,EXTRA_ARGS="--max-samples 200000 --epochs 5 --skip-umap" \
 
 ## Outputs
 
-Written to `$PROJECT_DIR/outputs/<jobid>/` — one directory per job, so
+Written to `$PROJECT_DIR/outputs/<jobid>_<scheme>/` — one directory per job, so
 reruns do not overwrite each other and results stay separable from the
 tracked figures already in `outputs/`:
 
@@ -129,7 +140,6 @@ tracked figures already in `outputs/`:
   alone. Whole days rather than a random draw, because a reconstruction is
   judged on a map and a map needs every ice cell.
 - `mlp_autoencoder_latent{15,30,100}.pt` — trained weights
-
 - `normalization.npz`, `pca_latent*.npz` — the fitted scaling and PCA state
 
 Copy the whole run directory back — it is ~25 MB. Nothing stores what the models
@@ -140,8 +150,8 @@ the checkpoints plus the training matrix (`greenland_art.autoencoder.SavedRun`).
 ### Error boxplots and the per-variable latent views
 
 ```bash
-uv run python scripts/plot_error_summary.py --run-dir outputs/<jobid>
-uv run python scripts/plot_latent_by_variable.py --run-dir outputs/<jobid>
+uv run python scripts/plot_error_summary.py --run-dir outputs/<jobid>_<scheme>
+uv run python scripts/plot_latent_by_variable.py --run-dir outputs/<jobid>_<scheme>
 ```
 
 The first writes `error_summary/<variable>/{timestep,year,day,year_month,month}.png`
@@ -157,7 +167,7 @@ Both take `--fields` to render a subset.
 ### Interactive viewer
 
 ```bash
-uv run bokeh serve --show scripts/reconstruction_explorer.py -- --run-dir outputs/<jobid>
+uv run bokeh serve --show scripts/reconstruction_explorer.py -- --run-dir outputs/<jobid>_<scheme>
 ```
 
 Pick a model, a variable and a timestep; truth, prediction and |difference| are
@@ -168,7 +178,7 @@ timestep, so scrubbing shows the field change and not the colour bar.
 Copy the three `.json`/`.npz` files back; the figures are built locally with
 
 ```bash
-uv run python scripts/plot_latent_comparison.py --run-dir outputs/<jobid>
+uv run python scripts/plot_latent_comparison.py --run-dir outputs/<jobid>_<scheme>
 ```
 
 which writes `latent_structure.png` (both projections of every latent width,

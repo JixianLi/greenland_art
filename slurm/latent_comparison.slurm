@@ -58,9 +58,20 @@ module list 2>&1 || true
 
 PROJECT_DIR="${PROJECT_DIR:-$SCRATCH/greenland_art}"
 DATA="${DATA:-$PROJECT_DIR/datasets/mar_training_2000_2009.npz}"
-# Per-job subdirectory so successive runs do not overwrite each other, and
-# so results stay separable from the tracked figures in outputs/.
-OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs/${SLURM_JOB_ID:-manual}}"
+
+# Its own variable rather than something parsed back out of EXTRA_ARGS, because
+# the scheme has to reach two places at once -- the command line and the output
+# directory name -- and picking it out of a free-form string would let those two
+# disagree without anyone noticing.
+#   sbatch --export=ALL,NORMALIZATION=log1p_zscore slurm/latent_comparison.slurm
+NORMALIZATION="${NORMALIZATION:-zscore}"
+
+# Per-job subdirectory so successive runs do not overwrite each other, and so
+# results stay separable from the tracked figures in outputs/. The scheme is in
+# the name because four arms of the same experiment are otherwise six-digit job
+# ids that have to be looked up; the job id stays first so the directory still
+# sorts by submission order.
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs/${SLURM_JOB_ID:-manual}_${NORMALIZATION}}"
 
 cd "$PROJECT_DIR"
 mkdir -p logs "$OUTPUT_DIR"
@@ -77,6 +88,7 @@ fi
 echo "host       : $(hostname)"
 echo "job        : ${SLURM_JOB_ID:-none}"
 echo "data       : $DATA"
+echo "normalizing: $NORMALIZATION"
 echo "output     : $OUTPUT_DIR"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || echo "no nvidia-smi"
 
@@ -97,6 +109,17 @@ if [[ -n "${EXTRA_ARGS:-}" ]]; then
     read -r -a EXTRA_ARGS_ARRAY <<< "$EXTRA_ARGS"
 fi
 
+# A --normalization inside EXTRA_ARGS would win, because argparse takes the last
+# occurrence and EXTRA_ARGS is appended after the explicit flag. The run would
+# then be correct while its directory name said something else -- the kind of
+# mislabelling that is only discovered after the figures are already in a talk.
+if [[ " ${EXTRA_ARGS:-} " == *" --normalization"* ]]; then
+    echo "ERROR: set the scheme with NORMALIZATION=, not inside EXTRA_ARGS." >&2
+    echo "       EXTRA_ARGS is appended last, so it would override the flag and" >&2
+    echo "       leave $OUTPUT_DIR named for a scheme the run did not use." >&2
+    exit 1
+fi
+
 # --max-samples caps the matrix for a quick shakeout run; drop it for the full
 # fit. UMAP is the slow stage by far, so it is worth confirming the rest works
 # with --skip-umap before spending the full walltime.
@@ -110,6 +133,7 @@ uv run python scripts/run_latent_comparison.py \
     --umap-subsample 150000 \
     --umap-parallel \
     --device cuda \
+    --normalization "$NORMALIZATION" \
     ${EXTRA_ARGS_ARRAY[@]+"${EXTRA_ARGS_ARRAY[@]}"}
 
 echo "done: $OUTPUT_DIR"
